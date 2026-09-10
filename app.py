@@ -1,14 +1,11 @@
 """
-Versión pública de la app MarkItDown, pensada para desplegarse en Render.
+Versión pública de la app MarkItDown, pensada para desplegarse en Render / PythonAnywhere.
 
-Diferencias frente a la versión local:
-- Corre en el puerto que Render le asigne (variable de entorno PORT), no en uno fijo.
-- Pide una contraseña compartida antes de dejar usar la app (la contraseña se
-  define en Render como variable de entorno APP_PASSWORD, nunca queda escrita
-  en este archivo).
-- Permite convertir varios archivos a la vez (hasta 10 por lote).
-- Límite de tamaño conservador (50 MB en total por lote), pensado para un
-  servidor gratuito compartido con memoria limitada.
+- Pide una contraseña compartida antes de dejar usar la app (variable de entorno APP_PASSWORD).
+- Permite convertir hasta 10 archivos a la vez.
+- Los archivos convertidos se descargan automáticamente como .md, sin mostrar
+  el texto en pantalla (más ágil para documentos largos).
+- Límite de 50 MB en total por lote, pensado para un servidor gratuito compartido.
 """
 
 import os
@@ -109,8 +106,7 @@ PAGINA_HTML = """<!DOCTYPE html>
 <style>
   :root {
     --bg: #f4f5f7; --card: #ffffff; --border: #d8dbe0;
-    --accent: #2f6f4f; --accent-hover: #245a3f;
-    --text: #23262b; --muted: #6b7280;
+    --accent: #2f6f4f; --text: #23262b; --muted: #6b7280;
     --error: #b3261e; --error-bg: #fdecea;
   }
   * { box-sizing: border-box; }
@@ -119,7 +115,7 @@ PAGINA_HTML = """<!DOCTYPE html>
     background: var(--bg); color: var(--text);
     display: flex; justify-content: center; padding: 48px 16px;
   }
-  .contenedor { width: 100%; max-width: 760px; }
+  .contenedor { width: 100%; max-width: 720px; }
   h1 { font-size: 1.5rem; margin: 0 0 4px 0; }
   p.subtitulo { color: var(--muted); margin: 0 0 28px 0; }
   .tarjeta {
@@ -140,7 +136,7 @@ PAGINA_HTML = """<!DOCTYPE html>
   #estado.visible { display: flex; }
   .spinner {
     width: 20px; height: 20px; border: 3px solid #d8dbe0; border-top-color: var(--accent);
-    border-radius: 50%; display: inline-block; vertical-align: middle; margin-right: 10px;
+    border-radius: 50%; display: inline-block; margin-right: 10px;
     animation: girar 0.8s linear infinite; flex-shrink: 0;
   }
   @keyframes girar { to { transform: rotate(360deg); } }
@@ -151,41 +147,26 @@ PAGINA_HTML = """<!DOCTYPE html>
   #error-general.visible { display: block; }
   #resultados { margin-top: 20px; display: none; }
   #resultados.visible { display: block; }
-  .resultado-item {
-    border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; overflow: hidden;
-  }
-  .resultado-cabecera {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 10px 14px; background: #fafafa; cursor: pointer; font-size: 0.9rem;
-  }
-  .resultado-cabecera .nombre { font-weight: 600; }
-  .resultado-cabecera .estado-ok { color: var(--accent); font-size: 0.8rem; }
-  .resultado-cabecera .estado-error { color: var(--error); font-size: 0.8rem; }
-  .resultado-cuerpo { padding: 14px; display: none; }
-  .resultado-cuerpo.abierto { display: block; }
-  .resultado-cuerpo .mensaje-error { color: var(--error); font-size: 0.85rem; }
-  textarea.salida-md {
-    width: 100%; min-height: 200px;
-    font-family: "SFMono-Regular", Consolas, "Courier New", monospace;
-    font-size: 0.85rem; padding: 12px; border-radius: 8px; border: 1px solid var(--border);
-    resize: vertical; background: #fafafa;
-  }
-  .acciones { margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .resultado-item { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; padding: 10px 14px; }
+  .resultado-fila { display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; }
+  .resultado-fila .nombre { font-weight: 600; }
+  .resultado-fila .estado-ok { color: var(--accent); font-size: 0.8rem; }
+  .resultado-fila .estado-error { color: var(--error); font-size: 0.8rem; }
+  .mensaje-error { color: var(--error); font-size: 0.82rem; margin-top: 6px; }
+  .acciones { margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; }
   button {
     font-family: inherit; font-size: 0.85rem; padding: 8px 14px; border-radius: 7px;
     border: 1px solid var(--border); background: white; cursor: pointer;
   }
-  button.primario { background: var(--accent); border-color: var(--accent); color: white; }
-  button.primario:hover { background: var(--accent-hover); }
-  button:not(.primario):hover { background: #f0f0f0; }
+  button:hover { background: #f0f0f0; }
   .aviso-tamano { font-size: 0.78rem; color: var(--muted); margin-top: 10px; text-align: center; }
-  #otro-lote { margin-top: 4px; }
+  .aviso-descarga { font-size: 0.78rem; color: var(--muted); margin-top: 10px; }
 </style>
 </head>
 <body>
 <div class="contenedor">
   <h1>MarkItDown</h1>
-  <p class="subtitulo">Convierte hasta 10 archivos a Markdown arrastrándolos aquí.</p>
+  <p class="subtitulo">Convierte hasta 10 archivos a Markdown arrastrándolos aquí. Todo ocurre en tu propio computador.</p>
 
   <div class="tarjeta">
     <div id="zona-arrastre">
@@ -196,7 +177,7 @@ PAGINA_HTML = """<!DOCTYPE html>
       <p class="secundario">PDF, Word, Excel, PowerPoint, imágenes, HTML y más</p>
     </div>
     <input type="file" id="entrada-archivo" multiple>
-    <p class="aviso-tamano">Hasta 10 archivos por lote · 50 MB en total</p>
+    <p class="aviso-tamano">Hasta 10 archivos por lote · 200 MB en total · se descargan como .md automáticamente</p>
 
     <div id="estado"><span class="spinner"></span>Convirtiendo, un momento...</div>
     <div id="error-general"></div>
@@ -259,7 +240,6 @@ async function convertirLote(listaArchivos) {
     if (respuesta.status === 401) { window.location.href = '/login'; return; }
     const cuerpo = await respuesta.json();
     if (!respuesta.ok) throw new Error(cuerpo.error || 'Ocurrió un error al convertir los archivos.');
-
     mostrarResultados(cuerpo.resultados);
   } catch (err) {
     errorGeneral.textContent = err.message;
@@ -271,62 +251,44 @@ async function convertirLote(listaArchivos) {
 
 function mostrarResultados(listaResultados) {
   resultados.innerHTML = '';
-  listaResultados.forEach((r, indice) => {
+  let huboDescargas = false;
+
+  listaResultados.forEach((r) => {
     const item = document.createElement('div');
     item.className = 'resultado-item';
 
-    const cabecera = document.createElement('div');
-    cabecera.className = 'resultado-cabecera';
-    cabecera.innerHTML = `<span class="nombre">${r.nombre_original}</span>` +
-      (r.error ? `<span class="estado-error">Error</span>` : `<span class="estado-ok">Convertido ✓</span>`);
-
-    const cuerpo = document.createElement('div');
-    cuerpo.className = 'resultado-cuerpo';
+    const fila = document.createElement('div');
+    fila.className = 'resultado-fila';
+    fila.innerHTML = `<span class="nombre">${r.nombre_original}</span>` +
+      (r.error ? `<span class="estado-error">Error</span>` : `<span class="estado-ok">Descargado ✓</span>`);
+    item.appendChild(fila);
 
     if (r.error) {
-      cuerpo.innerHTML = `<div class="mensaje-error">${r.error}</div>`;
+      const msg = document.createElement('div');
+      msg.className = 'mensaje-error';
+      msg.textContent = r.error;
+      item.appendChild(msg);
     } else {
-      const textarea = document.createElement('textarea');
-      textarea.className = 'salida-md';
-      textarea.readOnly = true;
-      textarea.value = r.markdown;
-
-      const acciones = document.createElement('div');
-      acciones.className = 'acciones';
-
-      const btnCopiar = document.createElement('button');
-      btnCopiar.className = 'primario';
-      btnCopiar.textContent = 'Copiar';
-      btnCopiar.addEventListener('click', async () => {
-        await navigator.clipboard.writeText(r.markdown);
-        btnCopiar.textContent = 'Copiado';
-        setTimeout(() => { btnCopiar.textContent = 'Copiar'; }, 1500);
-      });
-
-      const btnDescargar = document.createElement('button');
-      btnDescargar.textContent = 'Descargar .md';
-      btnDescargar.addEventListener('click', () => {
-        const blob = new Blob([r.markdown], { type: 'text/markdown;charset=utf-8' });
-        const enlace = document.createElement('a');
-        enlace.href = URL.createObjectURL(blob);
-        enlace.download = r.nombre_archivo;
-        enlace.click();
-        URL.revokeObjectURL(enlace.href);
-      });
-
-      acciones.appendChild(btnCopiar);
-      acciones.appendChild(btnDescargar);
-      cuerpo.appendChild(textarea);
-      cuerpo.appendChild(acciones);
+      const blob = new Blob([r.markdown], { type: 'text/markdown;charset=utf-8' });
+      const enlace = document.createElement('a');
+      enlace.href = URL.createObjectURL(blob);
+      enlace.download = r.nombre_archivo;
+      document.body.appendChild(enlace);
+      enlace.click();
+      document.body.removeChild(enlace);
+      URL.revokeObjectURL(enlace.href);
+      huboDescargas = true;
     }
 
-    cabecera.addEventListener('click', () => cuerpo.classList.toggle('abierto'));
-    item.appendChild(cabecera);
-    item.appendChild(cuerpo);
     resultados.appendChild(item);
-
-    if (indice === 0) cuerpo.classList.add('abierto');
   });
+
+  if (huboDescargas) {
+    const aviso = document.createElement('p');
+    aviso.className = 'aviso-descarga';
+    aviso.textContent = 'Si tu navegador bloqueó alguna descarga, permite descargas múltiples para este sitio.';
+    resultados.appendChild(aviso);
+  }
 
   resultados.classList.add('visible');
   accionesLote.style.display = 'flex';
